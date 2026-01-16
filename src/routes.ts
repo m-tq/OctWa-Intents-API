@@ -80,8 +80,7 @@ function isValidAddress(address: string): boolean {
 router.get('/quote', async (req: Request, res: Response) => {
   const { from, to, amount, slippageBps: slippageParam } = req.query;
   
-  console.log('\n[QUOTE] GET /quote', { from, to, amount, slippageBps: slippageParam });
-  
+  // Parse amount - handle scientific notation from query string
   const amountIn = parseFloat(amount as string);
   if (isNaN(amountIn) || amountIn <= 0) {
     res.status(400).json({ error: 'Invalid amount' });
@@ -91,6 +90,8 @@ router.get('/quote', async (req: Request, res: Response) => {
   // Parse slippage (default 0.5% = 50 bps)
   const slippageBps = slippageParam ? parseInt(slippageParam as string) : 50;
   const slippageMultiplier = 1 - slippageBps / 10000;
+  
+  console.log(`\n[QUOTE] GET /quote (${from}→${to}), amount: ${formatAmount(amountIn)} slippage: ${slippageBps}`);
   
   const { rate } = oracle.getRate();
   
@@ -314,8 +315,8 @@ router.get('/swap/:intentId', (req: Request, res: Response) => {
     sourceTxHash: intent.sourceTxHash,
     targetAddress: intent.targetAddress,
     targetTxHash: intent.targetTxHash,
-    amountIn: intent.amountIn,
-    amountOut: intent.amountOut,
+    amountIn: safeNumber(intent.amountIn),
+    amountOut: intent.amountOut !== undefined ? safeNumber(intent.amountOut) : undefined,
   };
   
   res.json(response);
@@ -335,8 +336,8 @@ router.get('/oracle/price', (_req: Request, res: Response) => {
   
   res.json({
     pair: 'OCT/ETH',
-    rate,
-    inverseRate: inverse.rate,
+    rate: safeNumber(rate),
+    inverseRate: safeNumber(inverse.rate),
     updatedAt,
     feeBps: config.feeBps,
   });
@@ -488,7 +489,7 @@ router.get('/health', (_req: Request, res: Response) => {
     status: 'ok',
     timestamp: Date.now(),
     version: '2.0.0',
-    oracleRate: rate,
+    oracleRate: safeNumber(rate),
   });
 });
 
@@ -514,13 +515,13 @@ router.get('/liquidity', async (_req: Request, res: Response) => {
     
     res.json({
       oct: {
-        balance: octBalance,
-        minRequired: minOctLiquidity,
+        balance: safeNumber(octBalance),
+        minRequired: safeNumber(minOctLiquidity),
         sufficient: octSufficient,
       },
       eth: {
-        balance: ethBalance,
-        minRequired: minEthLiquidity,
+        balance: safeNumber(ethBalance),
+        minRequired: safeNumber(minEthLiquidity),
         sufficient: ethSufficient,
       },
       canSwapOctToEth: ethSufficient,
@@ -551,8 +552,8 @@ router.get('/intents', (_req: Request, res: Response) => {
       intentId: i.intentId,
       direction: i.direction,
       status: i.status,
-      amountIn: i.amountIn,
-      amountOut: i.amountOut,
+      amountIn: safeNumber(i.amountIn),
+      amountOut: i.amountOut !== undefined ? safeNumber(i.amountOut) : undefined,
       sourceAddress: i.sourceAddress,
       targetAddress: i.targetAddress,
       createdAt: i.createdAt,
@@ -608,8 +609,8 @@ router.get('/explorer', (req: Request, res: Response) => {
     targetAddress: i.targetAddress,
     sourceTxHash: i.sourceTxHash,
     targetTxHash: i.targetTxHash,
-    amountIn: i.amountIn,
-    amountOut: i.amountOut,
+    amountIn: safeNumber(i.amountIn),
+    amountOut: i.amountOut !== undefined ? safeNumber(i.amountOut) : undefined,
     createdAt: i.createdAt,
     fulfilledAt: i.fulfilledAt,
   }));
@@ -659,13 +660,13 @@ router.get('/history/:address', (req: Request, res: Response) => {
     payload: {
       fromAsset: i.direction === 'OCT_TO_ETH' ? 'OCT' : 'ETH',
       toAsset: i.direction === 'OCT_TO_ETH' ? 'ETH' : 'OCT',
-      amountIn: i.amountIn,
-      minAmountOut: i.payload.minAmountOut,
+      amountIn: safeNumber(i.amountIn),
+      minAmountOut: safeNumber(i.payload.minAmountOut),
       targetAddress: i.targetAddress,
     },
     sourceTxHash: i.sourceTxHash,
     targetTxHash: i.targetTxHash,
-    amountOut: i.amountOut,
+    amountOut: i.amountOut !== undefined ? safeNumber(i.amountOut) : undefined,
     createdAt: i.createdAt,
     fulfilledAt: i.fulfilledAt,
     error: i.error,

@@ -61,7 +61,7 @@ export async function processOctToEthSubmission(octraTxHash: string): Promise<Su
     return { intentId: '', status: 'REJECTED', message: 'Invalid intent payload in transaction' };
   }
   
-  console.log('[SOLVER] ✅ Payload:', { amountIn: payload.amountIn, targetAddress: payload.targetAddress });
+  console.log('[SOLVER] ✅ Payload:', { amountIn: payload.amountIn.toFixed(18), targetAddress: payload.targetAddress });
   
   // Step 4: Validate intent
   const validation = validateIntentPayload(payload, tx, config.octraEscrowAddress);
@@ -76,7 +76,7 @@ export async function processOctToEthSubmission(octraTxHash: string): Promise<Su
 
   // Step 6: Calculate ETH output using oracle
   const ethOut = oracle.calculateEthOut(payload.amountIn, config.feeBps);
-  console.log('[SOLVER] ETH output:', ethOut, '(min:', payload.minAmountOut, ')');
+  console.log('[SOLVER] ETH output:', ethOut.toFixed(18), '(min:', payload.minAmountOut.toFixed(18), ')');
 
   if (ethOut < payload.minAmountOut) {
     return {
@@ -278,7 +278,7 @@ export async function processEthToOctSubmission(sepoliaTxHash: string): Promise<
 
   // Step 8: Parse ETH amount (wei to ETH)
   const ethAmount = parseFloat(tx.value) / 1e18;
-  console.log('[SOLVER] ETH amount:', ethAmount);
+  console.log('[SOLVER] ETH amount:', ethAmount.toFixed(18));
 
   if (ethAmount <= 0) {
     return { intentId: '', status: 'REJECTED', message: 'Invalid ETH amount' };
@@ -286,7 +286,7 @@ export async function processEthToOctSubmission(sepoliaTxHash: string): Promise<
 
   // Step 9: Calculate OCT output using oracle
   const octOut = oracle.calculateOctOut(ethAmount, config.feeBps);
-  console.log('[SOLVER] OCT output:', octOut, '(min:', intentData.minAmountOut, ')');
+  console.log('[SOLVER] OCT output:', octOut.toFixed(6), '(min:', intentData.minAmountOut.toFixed(6), ')');
 
   if (octOut < intentData.minAmountOut) {
     return {
