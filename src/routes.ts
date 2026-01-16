@@ -15,6 +15,34 @@ interface SubmitEthToOctRequest {
 export const router = Router();
 
 // =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Format number to fixed decimal string without scientific notation
+ * Handles very small numbers like 0.000000015
+ */
+function formatAmount(num: number, decimals: number = 18): string {
+  if (num === 0) return '0';
+  // Use toFixed to avoid scientific notation, then remove trailing zeros
+  const fixed = num.toFixed(decimals);
+  // Remove trailing zeros but keep at least one decimal place for small numbers
+  return fixed.replace(/\.?0+$/, '') || '0';
+}
+
+/**
+ * Format number for JSON response - returns number type but safe from scientific notation
+ * For very small numbers, we keep more precision
+ */
+function safeNumber(num: number): number {
+  if (num === 0) return 0;
+  // Convert to string with fixed decimals then back to number
+  // This ensures JSON.stringify won't use scientific notation for reasonable values
+  const str = num.toFixed(18).replace(/\.?0+$/, '');
+  return parseFloat(str);
+}
+
+// =============================================================================
 // SECURITY: Input Validation Helpers
 // =============================================================================
 
@@ -95,18 +123,18 @@ router.get('/quote', async (req: Request, res: Response) => {
     const quote = {
       from: 'OCT',
       to: 'ETH',
-      amountIn,
-      estimatedOut,
-      minAmountOut,
-      rate,
+      amountIn: safeNumber(amountIn),
+      estimatedOut: safeNumber(estimatedOut),
+      minAmountOut: safeNumber(minAmountOut),
+      rate: safeNumber(rate),
       feeBps: config.feeBps,
       slippageBps,
       expiresIn: config.quoteExpirySeconds,
       escrowAddress: config.octraEscrowAddress,
       network: 'ethereum_sepolia',
       liquidity: {
-        available: liquidityAvailable,
-        required: minAmountOut,
+        available: liquidityAvailable !== null ? safeNumber(liquidityAvailable) : null,
+        required: safeNumber(minAmountOut),
         sufficient: hasLiquidity,
       },
     };
@@ -143,18 +171,18 @@ router.get('/quote', async (req: Request, res: Response) => {
     const quote = {
       from: 'ETH',
       to: 'OCT',
-      amountIn,
-      estimatedOut,
-      minAmountOut,
-      rate: inverseRate,
+      amountIn: safeNumber(amountIn),
+      estimatedOut: safeNumber(estimatedOut),
+      minAmountOut: safeNumber(minAmountOut),
+      rate: safeNumber(inverseRate),
       feeBps: config.feeBps,
       slippageBps,
       expiresIn: config.quoteExpirySeconds,
       escrowAddress: getEscrowAddress(),
       network: 'octra_mainnet',
       liquidity: {
-        available: liquidityAvailable,
-        required: minAmountOut,
+        available: liquidityAvailable !== null ? safeNumber(liquidityAvailable) : null,
+        required: safeNumber(minAmountOut),
         sufficient: hasLiquidity,
       },
     };

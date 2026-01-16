@@ -90,10 +90,9 @@ export async function sendETH(
       return { success: false, error: 'Invalid recipient address' };
     }
     
-    // Fix precision: ETH has 18 decimals, but parseEther can't handle too many decimal places
-    // Round to 18 decimal places max (actually use fewer to be safe)
-    const amountFixed = parseFloat(amountEth.toFixed(18)).toString();
-    const amountWei = ethers.parseEther(amountFixed);
+    // Fix precision: Convert to wei directly to avoid parseEther issues with scientific notation
+    // ETH has 18 decimals, multiply by 10^18 and floor to get wei as bigint
+    const amountWei = BigInt(Math.floor(amountEth * 1e18));
     
     const balance = await provider.getBalance(wallet.address);
     if (balance < amountWei) {
@@ -105,7 +104,7 @@ export async function sendETH(
       value: amountWei,
     });
     
-    console.log(`[Sepolia] Sent ${amountFixed} ETH to ${toAddress}, tx: ${tx.hash}`);
+    console.log(`[Sepolia] Sent ${amountEth} ETH to ${toAddress}, tx: ${tx.hash}`);
     
     const receipt = await tx.wait();
     
