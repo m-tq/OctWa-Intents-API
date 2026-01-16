@@ -31,15 +31,24 @@ function formatAmount(num: number, decimals: number = 18): string {
 }
 
 /**
- * Format number for JSON response - returns number type but safe from scientific notation
- * For very small numbers, we keep more precision
+ * Format number for JSON response - returns string for very small numbers to avoid scientific notation
+ * JavaScript JSON.stringify converts small numbers like 0.0000006 to "6e-7"
+ * By returning string, we preserve the decimal format
  */
-function safeNumber(num: number): number {
+function safeNumber(num: number): number | string {
   if (num === 0) return 0;
-  // Convert to string with fixed decimals then back to number
-  // This ensures JSON.stringify won't use scientific notation for reasonable values
-  const str = num.toFixed(18).replace(/\.?0+$/, '');
-  return parseFloat(str);
+  if (num === null || num === undefined || isNaN(num)) return 0;
+  
+  // For very small numbers (< 0.0001) or very large numbers, return as formatted string
+  // This prevents JSON.stringify from using scientific notation
+  if (Math.abs(num) < 0.0001 && num !== 0) {
+    return formatAmount(num);
+  }
+  
+  // For normal numbers, round to reasonable precision
+  // This also handles floating point precision issues like 0.039799999999999995
+  const decimals = Math.abs(num) < 1 ? 8 : 6;
+  return parseFloat(num.toFixed(decimals));
 }
 
 // =============================================================================
@@ -98,11 +107,11 @@ router.get('/quote', async (req: Request, res: Response) => {
   if (from === 'OCT' && to === 'ETH') {
     // Security: Check swap limits
     if (amountIn < config.minSwapOct) {
-      res.status(400).json({ error: `Minimum swap amount is ${config.minSwapOct} OCT` });
+      res.status(400).json({ error: `Minimum swap amount is ${formatAmount(config.minSwapOct)} OCT` });
       return;
     }
     if (amountIn > config.maxSwapOct) {
-      res.status(400).json({ error: `Maximum swap amount is ${config.maxSwapOct} OCT` });
+      res.status(400).json({ error: `Maximum swap amount is ${formatAmount(config.maxSwapOct)} OCT` });
       return;
     }
     
@@ -146,11 +155,11 @@ router.get('/quote', async (req: Request, res: Response) => {
   } else if (from === 'ETH' && to === 'OCT') {
     // Security: Check swap limits
     if (amountIn < config.minSwapEth) {
-      res.status(400).json({ error: `Minimum swap amount is ${config.minSwapEth} ETH` });
+      res.status(400).json({ error: `Minimum swap amount is ${formatAmount(config.minSwapEth)} ETH` });
       return;
     }
     if (amountIn > config.maxSwapEth) {
-      res.status(400).json({ error: `Maximum swap amount is ${config.maxSwapEth} ETH` });
+      res.status(400).json({ error: `Maximum swap amount is ${formatAmount(config.maxSwapEth)} ETH` });
       return;
     }
     
@@ -307,7 +316,7 @@ router.get('/swap/:intentId', (req: Request, res: Response) => {
     return;
   }
   
-  const response: StatusResponse = {
+  res.json({
     intentId: intent.intentId,
     direction: intent.direction,
     status: intent.status,
@@ -317,9 +326,7 @@ router.get('/swap/:intentId', (req: Request, res: Response) => {
     targetTxHash: intent.targetTxHash,
     amountIn: safeNumber(intent.amountIn),
     amountOut: intent.amountOut !== undefined ? safeNumber(intent.amountOut) : undefined,
-  };
-  
-  res.json(response);
+  });
 });
 
 // =============================================================================
