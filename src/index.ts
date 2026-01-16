@@ -13,13 +13,10 @@ const app = express();
 // Security: CORS configuration
 const corsOptions: cors.CorsOptions = {
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, etc.) in dev mode
+    // Allow requests with no origin (direct browser access, curl, mobile apps, server-to-server)
+    // This is safe because CORS only protects browser-based cross-origin requests
     if (!origin) {
-      if (config.allowedOrigins.length === 0) {
-        callback(null, true);
-      } else {
-        callback(new Error('CORS: Origin required'));
-      }
+      callback(null, true);
       return;
     }
     
