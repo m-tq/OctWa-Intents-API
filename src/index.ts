@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import { config } from './config.js';
 import { router } from './routes.js';
-import { oracle } from './oracle.js';
+import { oracle, startEthUsdFetcher } from './oracle.js';
 import { initSepolia, getHotWalletBalance, getEscrowAddress } from './sepolia.js';
 import { initOctraEscrow, getEscrowBalance } from './octra.js';
 import { startExpiryChecker } from './solver.js';
@@ -84,6 +84,9 @@ async function start() {
   
   // Get oracle rate
   const { rate } = oracle.getRate();
+  
+  // Start ETH/USD price fetcher
+  startEthUsdFetcher();
   
   // Start expiry checker
   startExpiryChecker();

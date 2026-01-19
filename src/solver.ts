@@ -10,6 +10,7 @@ import {
   getEscrowBalanceFresh,
 } from './octra.js';
 import { sendETH, fetchSepoliaTransaction, getHotWalletBalanceFresh } from './sepolia.js';
+import { parseAndVerifyEvmEnvelope } from './crypto.js';
 import type { Intent, SubmitResponse } from './types.js';
 
 // Liquidity buffer - require 10% extra to handle concurrent swaps
@@ -163,52 +164,6 @@ async function fulfillOctToEth(intentId: string, ethOut: number): Promise<void> 
 // ETH → OCT SWAP
 // =============================================================================
 
-/**
- * Parse intent payload from Sepolia tx.input (hex encoded JSON)
- */
-function parseEthIntentPayload(txInput: string | undefined): {
-  targetOctraAddress: string;
-  minAmountOut: number;
-  expiry: number;
-  nonce: string;
-} | null {
-  if (!txInput || txInput === '0x' || txInput.length < 4) {
-    console.log('[SOLVER] No payload in tx.input');
-    return null;
-  }
-
-  try {
-    // Remove 0x prefix and decode hex to string
-    const hexData = txInput.startsWith('0x') ? txInput.slice(2) : txInput;
-    const jsonString = Buffer.from(hexData, 'hex').toString('utf8');
-    console.log('[SOLVER] Decoded payload:', jsonString);
-
-    const parsed = JSON.parse(jsonString);
-    const payload = parsed.payload || parsed;
-
-    // Validate required fields
-    if (
-      !payload.targetAddress ||
-      typeof payload.minAmountOut !== 'number' ||
-      typeof payload.expiry !== 'number' ||
-      !payload.nonce
-    ) {
-      console.log('[SOLVER] Invalid ETH intent payload structure');
-      return null;
-    }
-
-    return {
-      targetOctraAddress: payload.targetAddress,
-      minAmountOut: payload.minAmountOut,
-      expiry: payload.expiry,
-      nonce: payload.nonce,
-    };
-  } catch (error) {
-    console.error('[SOLVER] Failed to parse ETH intent payload:', error);
-    return null;
-  }
-}
-
 export async function processEthToOctSubmission(sepoliaTxHash: string): Promise<SubmitResponse> {
   console.log('\n[SOLVER] ========== ETH → OCT SUBMISSION ==========');
   console.log('[SOLVER] sepoliaTxHash:', sepoliaTxHash);
@@ -252,17 +207,19 @@ export async function processEthToOctSubmission(sepoliaTxHash: string): Promise<
     };
   }
 
-  // Step 4: Parse intent payload from tx.input
-  console.log('\n[SOLVER] Step 4: Parsing intent payload from tx.input...');
-  const intentData = parseEthIntentPayload(tx.input);
-  if (!intentData) {
-    return { intentId: '', status: 'REJECTED', message: 'Invalid or missing intent payload in transaction data' };
+  // Step 4: Parse and verify intent payload from tx.input (with hash verification)
+  console.log('\n[SOLVER] Step 4: Parsing and verifying intent payload from tx.input...');
+  const verifyResult = parseAndVerifyEvmEnvelope(tx.input || '');
+  
+  if (!verifyResult.valid) {
+    return { intentId: '', status: 'REJECTED', message: verifyResult.error || 'Invalid payload' };
   }
-
-  console.log('[SOLVER] ✅ Intent data:', intentData);
+  
+  const intentData = verifyResult.payload!;
+  console.log('[SOLVER] ✅ Intent data verified:', intentData);
 
   // Step 5: Validate target Octra address format
-  if (!intentData.targetOctraAddress.startsWith('oct')) {
+  if (!intentData.targetAddress.startsWith('oct')) {
     return { intentId: '', status: 'REJECTED', message: 'Invalid Octra address format' };
   }
 
@@ -319,7 +276,7 @@ export async function processEthToOctSubmission(sepoliaTxHash: string): Promise<
     amountIn: ethAmount,
     minAmountOut: intentData.minAmountOut,
     targetChain: 'octra_mainnet' as const,
-    targetAddress: intentData.targetOctraAddress,
+    targetAddress: intentData.targetAddress,
     expiry: intentData.expiry,
     nonce: intentData.nonce,
   };
@@ -330,7 +287,7 @@ export async function processEthToOctSubmission(sepoliaTxHash: string): Promise<
     sourceAddress: tx.from,
     sourceTxHash: sepoliaTxHash,
     amountIn: ethAmount,
-    targetAddress: intentData.targetOctraAddress,
+    targetAddress: intentData.targetAddress,
     minAmountOut: intentData.minAmountOut,
     status: hasLiquidity ? 'OPEN' : 'PENDING',
     expiry: intentData.expiry,

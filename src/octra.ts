@@ -1,5 +1,6 @@
 import { config } from './config.js';
 import type { OctraTransaction, SwapIntentPayload } from './types.js';
+import { parseAndVerifyOctraEnvelope } from './crypto.js';
 import nacl from 'tweetnacl';
 
 /**
@@ -348,14 +349,17 @@ export function parseIntentPayload(message: string | undefined): SwapIntentPaylo
   }
   
   try {
-    // Message format: { payload: SwapIntentPayload, signature: string }
-    // Or just the payload directly
     console.log('[OCTRA] Raw message:', message);
     
-    const parsed = JSON.parse(message);
-    const payload = parsed.payload || parsed;
+    // Use crypto module to parse and verify envelope
+    const result = parseAndVerifyOctraEnvelope(message);
     
-    console.log('[OCTRA] Parsed payload:', payload);
+    if (!result.valid) {
+      console.log('[OCTRA] ❌ Envelope verification failed:', result.error);
+      return null;
+    }
+    
+    const payload = result.payload!;
     
     // Validate required fields
     if (

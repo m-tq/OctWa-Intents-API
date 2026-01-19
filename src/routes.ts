@@ -5,7 +5,7 @@ import { oracle } from './oracle.js';
 import { processOctToEthSubmission, processEthToOctSubmission } from './solver.js';
 import { fetchOctraTransaction, getEscrowBalance as getOctEscrowBalance } from './octra.js';
 import { getEscrowAddress, getHotWalletBalance, fetchSepoliaTransaction, getAddressBalance, getTxReceiptStatus } from './sepolia.js';
-import type { QuoteResponse, SubmitOctToEthRequest, StatusResponse } from './types.js';
+import type { SubmitOctToEthRequest } from './types.js';
 
 // ETH→OCT submit request (only txHash, payload is in tx.input)
 interface SubmitEthToOctRequest {
@@ -85,6 +85,7 @@ function isValidAddress(address: string): boolean {
 /**
  * GET /quote
  * Get quote for OCT → ETH or ETH → OCT
+ * Now includes price impact calculation
  */
 router.get('/quote', async (req: Request, res: Response) => {
   const { from, to, amount, slippageBps: slippageParam } = req.query;
@@ -103,6 +104,9 @@ router.get('/quote', async (req: Request, res: Response) => {
   console.log(`\n[QUOTE] GET /quote (${from}→${to}), amount: ${formatAmount(amountIn)} slippage: ${slippageBps}`);
   
   const { rate } = oracle.getRate();
+  const prices = oracle.getPrices();
+  const ethUsdData = oracle.getEthUsd();
+  const ethUsd = ethUsdData.price;
   
   if (from === 'OCT' && to === 'ETH') {
     // Security: Check swap limits
@@ -115,9 +119,12 @@ router.get('/quote', async (req: Request, res: Response) => {
       return;
     }
     
-    // OCT → ETH
+    // OCT → ETH with AMM price impact
     const estimatedOut = oracle.calculateEthOut(amountIn, config.feeBps);
     const minAmountOut = estimatedOut * slippageMultiplier;
+    
+    // Calculate price impact
+    const priceImpact = oracle.calculatePriceImpact('OCT_TO_ETH', amountIn);
     
     // Check ETH liquidity
     let liquidityAvailable: number | null = null;
@@ -137,6 +144,8 @@ router.get('/quote', async (req: Request, res: Response) => {
       estimatedOut: safeNumber(estimatedOut),
       minAmountOut: safeNumber(minAmountOut),
       rate: safeNumber(rate),
+      effectiveRate: safeNumber(priceImpact.effectivePrice),
+      priceImpact: safeNumber(priceImpact.priceImpactPercent),
       feeBps: config.feeBps,
       slippageBps,
       expiresIn: config.quoteExpirySeconds,
@@ -147,9 +156,26 @@ router.get('/quote', async (req: Request, res: Response) => {
         required: safeNumber(minAmountOut),
         sufficient: hasLiquidity,
       },
+      oracle: {
+        spotPrice: safeNumber(prices.spot),
+        emaPrice: safeNumber(prices.ema),
+        twapPrice: safeNumber(prices.twap),
+      },
+      usd: ethUsd > 0 ? {
+        ethPrice: safeNumber(ethUsd),
+        octPrice: safeNumber(rate * ethUsd),
+        amountInUsd: safeNumber(amountIn * rate * ethUsd),
+        estimatedOutUsd: safeNumber(estimatedOut * ethUsd),
+      } : null,
     };
     
-    console.log('[QUOTE] OCT→ETH:', { amountIn, estimatedOut, minAmountOut, hasLiquidity, liquidityAvailable });
+    console.log('[QUOTE] OCT→ETH:', { 
+      amountIn, 
+      estimatedOut, 
+      minAmountOut, 
+      priceImpact: priceImpact.priceImpactPercent.toFixed(4) + '%',
+      hasLiquidity 
+    });
     res.json(quote);
     
   } else if (from === 'ETH' && to === 'OCT') {
@@ -163,10 +189,13 @@ router.get('/quote', async (req: Request, res: Response) => {
       return;
     }
     
-    // ETH → OCT
+    // ETH → OCT with AMM price impact
     const estimatedOut = oracle.calculateOctOut(amountIn, config.feeBps);
     const minAmountOut = estimatedOut * slippageMultiplier;
     const inverseRate = 1 / rate;
+    
+    // Calculate price impact
+    const priceImpact = oracle.calculatePriceImpact('ETH_TO_OCT', amountIn);
     
     // Check OCT liquidity
     let liquidityAvailable: number | null = null;
@@ -185,6 +214,8 @@ router.get('/quote', async (req: Request, res: Response) => {
       estimatedOut: safeNumber(estimatedOut),
       minAmountOut: safeNumber(minAmountOut),
       rate: safeNumber(inverseRate),
+      effectiveRate: safeNumber(1 / priceImpact.effectivePrice),
+      priceImpact: safeNumber(priceImpact.priceImpactPercent),
       feeBps: config.feeBps,
       slippageBps,
       expiresIn: config.quoteExpirySeconds,
@@ -195,9 +226,27 @@ router.get('/quote', async (req: Request, res: Response) => {
         required: safeNumber(minAmountOut),
         sufficient: hasLiquidity,
       },
+      oracle: {
+        spotPrice: safeNumber(prices.spot),
+        emaPrice: safeNumber(prices.ema),
+        twapPrice: safeNumber(prices.twap),
+      },
+      usd: ethUsd > 0 ? {
+        ethPrice: safeNumber(ethUsd),
+        octPrice: safeNumber(rate * ethUsd),
+        amountInUsd: safeNumber(amountIn * ethUsd),
+        estimatedOutUsd: safeNumber(estimatedOut * rate * ethUsd),
+      } : null,
     };
     
-    console.log('[QUOTE] ETH→OCT:', { amountIn, estimatedOut, minAmountOut, hasLiquidity, liquidityAvailable });
+    console.log('[QUOTE] ETH→OCT:', { 
+      amountIn, 
+      estimatedOut, 
+      minAmountOut, 
+      priceImpact: priceImpact.priceImpactPercent.toFixed(4) + '%',
+      hasLiquidity,
+      liquidityAvailable 
+    });
     res.json(quote);
     
   } else {
@@ -335,11 +384,13 @@ router.get('/swap/:intentId', (req: Request, res: Response) => {
 
 /**
  * GET /oracle/price
- * Get current OCT/ETH rate
+ * Get current OCT/ETH rate with USD prices
  */
 router.get('/oracle/price', (_req: Request, res: Response) => {
   const { rate, updatedAt } = oracle.getRate();
   const inverse = oracle.getInverseRate();
+  const ethUsdData = oracle.getEthUsd();
+  const ethUsd = ethUsdData.price;
   
   res.json({
     pair: 'OCT/ETH',
@@ -347,6 +398,12 @@ router.get('/oracle/price', (_req: Request, res: Response) => {
     inverseRate: safeNumber(inverse.rate),
     updatedAt,
     feeBps: config.feeBps,
+    usd: ethUsd > 0 ? {
+      ethPrice: safeNumber(ethUsd),
+      octPrice: safeNumber(rate * ethUsd),
+      source: ethUsdData.source,
+      updatedAt: ethUsdData.updatedAt,
+    } : null,
   });
 });
 
